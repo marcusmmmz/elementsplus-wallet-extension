@@ -16,6 +16,26 @@ describe("operation validation", () => {
     assert.deepEqual(op, { kind: "transfer", assetId: ECX, recipient: ADDRESS_2, amount: "5", feeRate: 2 });
   });
 
+  it("accepts unconfidential Taproot recipients and rejects confidential ones", () => {
+    const taproot = "elements1ptfd95kj6tfd95kj6tfd95kj6tfd95kj6tfd95kj6tfd95kj6tfdqfzvevn";
+    const taprootAlias = "ert1ptfd95kj6tfd95kj6tfd95kj6tfd95kj6tfd95kj6tfd95kj6tfdq08u6qv";
+    for (const recipient of [taproot, taprootAlias]) {
+      const op = validateOperation({ kind: "transfer", assetId: ECX, recipient, amount: "5" });
+      assert.deepEqual(op, { kind: "transfer", assetId: ECX, recipient: taproot, amount: "5", feeRate: 2 });
+    }
+    const confidentialTaproot = [
+      "elementsl1pqwp9ze75659cn5ad0hw25nt2kv7j882gudn636hnh4qvjcmjh6jq5ca0d4cgl009m5rn5w0n3k2cqa3ths2qf7s8q6x2xplwgvlfhg0ag5kxszmzfcmc",
+      "el1pqwp9ze75659cn5ad0hw25nt2kv7j882gudn636hnh4qvjcmjh6jq5ca0d4cgl009m5rn5w0n3k2cqa3ths2qf7s8q6x2xplwgvlfhg0atxwjah9089tf",
+    ];
+    for (const recipient of confidentialTaproot) {
+      assert.throws(
+        () => validateOperation({ kind: "transfer", assetId: ECX, recipient, amount: "5" }),
+        /must be an explicit \(non-confidential\) address/,
+        recipient,
+      );
+    }
+  });
+
   it("rejects extra fields, floats, zero amounts and bad fee rates", () => {
     const bad = [
       { kind: "transfer", assetId: ECX, recipient: ADDRESS_2, amount: "5", memo: "x" },

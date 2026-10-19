@@ -15,6 +15,12 @@ profile compiled in via `ELEMENTSPLUS_NETWORK_PROFILE` (set by
 - unconfidential P2WPKH in the profile's native encoding (ECX Alpha used
   `elements1...` with an equivalent `ert1...` alias), and opt-in confidential
   P2WPKH (`elementsl1...` / `el1...`, SLIP-77);
+- transfer recipients: unconfidential P2WPKH or Taproot (witness v1, 32-byte
+  program, `elements1p...` / `ert1p...`, e.g. a Simplicity covenant), or
+  confidential P2WPKH. Taproot recipients are explicit-only (a blinded
+  covenant deposit may be unspendable); confidential Taproot, other witness
+  versions and other program lengths are refused. The wallet's own receive
+  and change addresses stay P2WPKH;
 - explicit inputs and outputs of **any asset**, plus confidential (blinded)
   ones in transfers, issuances, offer splits and cancels (see below); the fee
   is always one explicit policy-asset output.
@@ -90,7 +96,8 @@ from an issuance input.
   checks on the final transaction.
 - **Fees.** The size model adds an upper bound per blinded output (52-bit
   rangeproof ≤ 4174 bytes, surjection proof ≤ 162 bytes) to the explicit
-  P2WPKH model.
+  explicit model (P2WPKH inputs; output scripts at their real length, so a
+  34-byte Taproot recipient is counted as such).
 - **Swaps stay explicit.** `prepare_swap_offer` refuses a confidential UTXO
   (`WalletError::Confidential`, "split it … first"); `take_swap_offers` never
   selects confidential UTXOs and explains an underfunded take; the analyzer

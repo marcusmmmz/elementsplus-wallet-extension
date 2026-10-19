@@ -25,13 +25,15 @@ pub const POLICY_DUST_LIMIT: u64 = 546;
 /// Hard cap on caller-supplied UTXO lists and offers per request.
 const MAX_REQUEST_ITEMS: usize = 500;
 
-// Size model for explicit P2WPKH Elements transactions. Every term is an
-// upper bound so the computed fee rate never falls below the requested one.
+// Size model for explicit Elements transactions spending P2WPKH inputs.
+// Output scripts are counted at their real length (22-byte P2WPKH, 34-byte
+// Taproot `OP_1 <32>`, ...). Every term is an upper bound so the computed fee
+// rate never falls below the requested one.
 const TX_OVERHEAD_BASE: u64 = 4 + 1 + 3 + 3 + 4; // version, flag, vin/vout counts, locktime
 const INPUT_BASE: u64 = 32 + 4 + 1 + 4; // outpoint, empty scriptSig, sequence
 const ISSUANCE_BASE: u64 = 32 + 32 + 9 + 9; // nonce, entropy, amount, inflation keys
 const INPUT_WITNESS: u64 = 1 + 1 + 1 + (1 + 73) + (1 + 33) + 1;
-const OUTPUT_BASE: u64 = 33 + 9 + 1 + 1; // asset, value, nonce, script length
+const OUTPUT_BASE: u64 = 33 + 9 + 1 + 1; // asset, value, nonce, script length (< 253 bytes)
 const OUTPUT_WITNESS: u64 = 1 + 1;
 const P2WPKH_SCRIPT_LEN: u64 = 22;
 // A blinded output replaces the 9-byte explicit value and 1-byte null nonce
@@ -500,8 +502,9 @@ impl WalletCore {
         })
     }
 
-    /// Send any asset to a P2WPKH recipient. A confidential address gets a
-    /// blinded output; an unconfidential one an explicit output.
+    /// Send any asset to a P2WPKH or Taproot recipient. A confidential
+    /// (P2WPKH-only) address gets a blinded output; an unconfidential one,
+    /// including every Taproot address, an explicit output.
     pub fn prepare_transfer(&self, request: &TransferRequest) -> Result<PreparedTx, WalletError> {
         validate_amount(request.amount)?;
         let asset = parse_asset(&request.asset_id)?;
@@ -840,6 +843,9 @@ mod tests {
         assert!(estimate_vsize(u64::MAX, false, &[], 0).is_err());
         let blinded = estimate_vsize(1, false, &[22, 22, 0], 2).unwrap();
         assert!(blinded > one + 2 * 1_000, "{blinded}");
+        // A Taproot recipient (34-byte script) costs its 12 extra bytes.
+        let taproot = estimate_vsize(1, false, &[34, 22, 0], 0).unwrap();
+        assert_eq!(taproot, one + 12);
     }
 
     #[test]

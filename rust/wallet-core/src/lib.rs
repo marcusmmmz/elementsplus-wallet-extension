@@ -748,8 +748,10 @@ impl WalletCore {
         Ok((p2wpkh_script(&key), key, path))
     }
 
-    /// Parse an unconfidential P2WPKH address or, for the configured
-    /// networks, a confidential (blech32) P2WPKH address.
+    /// Parse an unconfidential P2WPKH or Taproot (witness v1, 32-byte
+    /// program) address or, for the configured networks, a confidential
+    /// (blech32) P2WPKH address. Taproot recipients are explicit-only: a
+    /// covenant output that arrives blinded may never be spendable.
     pub(crate) fn parse_recipient(&self, recipient: &str) -> Result<Recipient, WalletError> {
         if recipient != recipient.to_ascii_lowercase() {
             return Err(WalletError::InvalidRecipient(
@@ -781,17 +783,21 @@ impl WalletCore {
         }
         let (hrp, version, program) = segwit::decode(recipient)
             .map_err(|_| WalletError::InvalidRecipient("invalid bech32 address"))?;
-        if (hrp != self.native_address_params.bech_hrp && hrp != self.alias_address_params.bech_hrp)
-            || version != segwit::VERSION_0
-            || program.len() != 20
-        {
+        let opcode = match (version, program.len()) {
+            (segwit::VERSION_0, 20) => Some(0x00),
+            (segwit::VERSION_1, 32) => Some(0x51), // OP_1
+            _ => None,
+        };
+        let Some(opcode) = opcode.filter(|_| {
+            hrp == self.native_address_params.bech_hrp || hrp == self.alias_address_params.bech_hrp
+        }) else {
             return Err(WalletError::InvalidRecipient(
-                "only configured unconfidential P2WPKH addresses are supported",
+                "only configured unconfidential P2WPKH or Taproot addresses are supported",
             ));
-        }
-        let mut bytes = Vec::with_capacity(22);
-        bytes.push(0);
-        bytes.push(20);
+        };
+        let mut bytes = Vec::with_capacity(2 + program.len());
+        bytes.push(opcode);
+        bytes.push(program.len() as u8);
         bytes.extend(program);
         Ok(Recipient {
             script: Script::from(bytes),
