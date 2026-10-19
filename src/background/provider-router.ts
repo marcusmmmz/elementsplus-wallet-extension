@@ -2,6 +2,8 @@
  * dApp provider router (spec §3.3). Requests arrive from content-script ports;
  * the origin is supplied by the service worker from the port's sender, never
  * from the page payload. Approvals happen in a separate extension window.
+ * `ep_connect` and `ep_sendTransfer` are a stable public API (spec §3.4):
+ * no breaking changes without a deprecation path.
  */
 import type { WalletSnapshot } from "../adapters/elementsplus-wasm.js";
 import type { NetworkIdentity } from "../network/identity.js";
