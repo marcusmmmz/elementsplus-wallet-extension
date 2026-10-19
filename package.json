@@ -9,7 +9,7 @@
     "build": "node scripts/build-all.mjs",
     "typecheck": "tsc --project tsconfig.json --noEmit",
     "test": "node scripts/test.mjs",
-    "test:build": "node --test test/build-paths.test.mjs",
+    "test:build": "node --test test/build-paths.test.mjs test/zip.test.mjs",
     "test:preconf": "cargo test --manifest-path services/preconfer-signer/Cargo.toml",
     "test:monitor": "node --test vendor/elementsplus-preconf/client/monitor.test.mjs",
     "test:monitor:integration": "node --test vendor/elementsplus-preconf/client/integration.test.mjs",
@@ -26,6 +26,7 @@
     "check": "npm run typecheck && npm test && npm run test:build && npm run build",
     "capture": "node scripts/capture-wallet-screens.mjs",
     "test:provider": "node scripts/provider-e2e.mjs",
+    "package:release": "node scripts/package-release.mjs",
     "build:profile": "node scripts/build-wasm.mjs && node scripts/build.mjs && node scripts/check-artifact.mjs"
   },
   "devDependencies": {

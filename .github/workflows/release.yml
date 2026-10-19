@@ -1,0 +1,67 @@
+# Tester release: pushing a tag vX.Y.Z (matching package.json and both
+# manifests) builds, tests and checks the ecx-beta artifact, zips it, and
+# publishes a GitHub pre-release. See docs/RELEASING.md.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    env:
+      PROFILE: ecx-beta
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      # rust-toolchain.toml pins Rust 1.89.0 and the wasm32 target.
+      - name: Rust toolchain
+        run: rustup toolchain install
+
+      - name: wasm-bindgen-cli
+        run: |
+          version=$(sed -n 's/^const wasmBindgenVersion = "\(.*\)";$/\1/p' scripts/build-wasm.mjs)
+          cargo install wasm-bindgen-cli --version "$version" --locked
+
+      - run: npm ci --ignore-scripts
+
+      - name: Wallet core tests
+        run: cargo test --locked --manifest-path rust/wallet-core/Cargo.toml
+
+      - name: Typecheck, tests and every artifact
+        run: npm run check
+
+      - name: Build ${{ env.PROFILE }}
+        run: ELEMENTSPLUS_NETWORK_PROFILE="$PROFILE" npm run build:profile
+
+      - name: Package
+        run: npm run package:release -- --profile "$PROFILE" --tag "$GITHUB_REF_NAME"
+
+      - name: Publish pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > release-notes.md <<NOTES
+          Experimental Elements+ Wallet for **eCash Beta · Elements** (\`$PROFILE\`). Test funds only.
+
+          **Install / update:** follow [docs/INSTALL-TESTERS.md](https://github.com/$GITHUB_REPOSITORY/blob/$GITHUB_REF_NAME/docs/INSTALL-TESTERS.md).
+          Write down your recovery phrase before updating.
+
+          - Chrome, Brave, Edge: \`elementsplus-wallet-$PROFILE-$GITHUB_REF_NAME-chromium.zip\`
+          - Firefox (temporary add-on, forgotten on restart): \`elementsplus-wallet-$PROFILE-$GITHUB_REF_NAME-firefox.zip\`
+
+          Checksums: \`elementsplus-wallet-$PROFILE-$GITHUB_REF_NAME-SHA256SUMS.txt\`
+          NOTES
+          gh release create "$GITHUB_REF_NAME" release/* \
+            --title "Elements+ Wallet $GITHUB_REF_NAME ($PROFILE)" \
+            --notes-file release-notes.md \
+            --prerelease

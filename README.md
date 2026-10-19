@@ -4,6 +4,10 @@ An experimental browser-extension wallet for the Elements+ sidechain on eCash
 (ECX). It is **not** a Liquid wallet and never falls back to Liquid, Elements
 regtest, or another chain.
 
+**Testers:** install a prebuilt release by following
+[`docs/INSTALL-TESTERS.md`](docs/INSTALL-TESTERS.md); no build tools are needed.
+Maintainers cut releases as described in [`docs/RELEASING.md`](docs/RELEASING.md).
+
 Each artifact is built for exactly one **network profile** from the typed
 registry in [`src/network/profiles.ts`](src/network/profiles.ts) (mirrored in
 `rust/wallet-core/src/network.rs`); the profile's pins are compiled in and are
