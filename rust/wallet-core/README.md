@@ -16,11 +16,13 @@ profile compiled in via `ELEMENTSPLUS_NETWORK_PROFILE` (set by
   `elements1...` with an equivalent `ert1...` alias), and opt-in confidential
   P2WPKH (`elementsl1...` / `el1...`, SLIP-77);
 - transfer recipients: unconfidential P2WPKH or Taproot (witness v1, 32-byte
-  program, `elements1p...` / `ert1p...`, e.g. a Simplicity covenant), or
-  confidential P2WPKH. Taproot recipients are explicit-only (a blinded
-  covenant deposit may be unspendable); confidential Taproot, other witness
-  versions and other program lengths are refused. The wallet's own receive
-  and change addresses stay P2WPKH;
+  x-only key, `elements1p...` / `ert1p...`, e.g. a Simplicity covenant). The
+  extension's provider and send screen refuse confidential addresses; the
+  core itself also parses confidential P2WPKH. Taproot recipients are
+  explicit-only (a blinded covenant deposit may be unspendable); confidential
+  Taproot, off-curve Taproot programs, other witness versions and other
+  program lengths are refused. The wallet's own receive and change addresses
+  stay P2WPKH;
 - explicit inputs and outputs of **any asset**, plus confidential (blinded)
   ones in transfers, issuances, offer splits and cancels (see below); the fee
   is always one explicit policy-asset output.
