@@ -200,7 +200,7 @@ Also dispatch `window.dispatchEvent(new Event("elementsplus#initialized"))`.
 | `ep_disconnect` | – | `null` | none |
 | `ep_getAddress` | – | `{ address }` | connected |
 | `ep_getBalances` | – | `[{ assetId, amount, confirmed }]` | connected |
-| `ep_sendTransfer` | `{ assetId, amount, recipient }` | `{ txid }` | Approve window |
+| `ep_sendTransfer` | `{ assetId, amount, recipient, feeRate? }` | `{ txid }` | Approve window |
 | `ep_makeSwapOffer` | `{ giveAsset, giveAmount, wantAsset, wantAmount }` | `{ offer, splitTxid? }` | one Approve window covering split (if needed) + offer |
 | `ep_takeSwapOffers` | `{ offers: Offer[] }` | `{ txid }` | Approve window |
 | `ep_cancelSwapOffer` | `{ txid, vout }` | `{ txid }` | Approve window |
@@ -219,6 +219,50 @@ page payload. Approvals open `src/ui/approve.html?id=…` via
 Manifest additions: `content_scripts` (`<all_urls>`, `run_at: document_start`,
 isolated world) plus a `web_accessible_resources` inpage script; permissions
 stay minimal (`storage`); host permissions for configured explorer/registry.
+
+### 3.4 Stable provider API
+
+`ep_connect` and `ep_sendTransfer` are a **stable public API**: external dApps
+(e.g. a Simplicity-covenant DEX funding orders) depend on them. The contract
+below is what `src/background/provider-router.ts` and
+`src/background/operations.ts` implement; keep it in sync with them.
+
+Request envelope: exactly `{ method, params? }` (other keys → `-32602`).
+`params` may be `{…}` or `[{…}]`.
+
+- **`ep_connect`**, no params (omitted, `null`, `[]`, `{}` or `[{}]`) →
+  `{ address, network: { name, genesisHash, policyAsset } }`. A non-object
+  `params` is rejected; keys inside an object are currently ignored, not
+  rejected. `name` is a display string; identify the chain by `genesisHash`
+  and `policyAsset` (lowercase hex).
+- **`ep_sendTransfer`**, `{ assetId, amount, recipient }` plus optional
+  `feeRate` → `{ txid }`. Unknown or missing keys → `-32602`. `assetId`:
+  64 lowercase hex chars. `amount`: decimal string of atomic units,
+  `1 ≤ amount < 2^64`. `recipient`: an address of the wallet's network,
+  canonical or alias spelling (normalised to canonical). `feeRate`: integer
+  sat/vB, 1–1000; default 2. Requires a prior `ep_connect` (`4100`
+  otherwise); user rejection, closing the window or timeout → `4001`; a
+  transfer the core cannot build or broadcast → `-32603`.
+
+Behaviour dApps rely on:
+
+- A transfer to an unconfidential recipient produces an **explicit** output
+  (unblinded asset and amount); the approval check refuses any review whose
+  recipient output differs from the request.
+- **Confidential recipients are rejected** (`-32602`, "must be an explicit
+  (non-confidential) address"), on the provider and the popup Send screen.
+- The address `ep_connect` returns is the unconfidential receive address
+  `m/84'/1'/0'/0/0`, which the wallet always scans for incoming explicit
+  outputs, whether or not confidential receive is enabled.
+
+**Rule.** No breaking change to these methods without a deprecation path:
+ship the new behaviour under a new method name or a versioned one (e.g.
+`ep_sendTransfer_v2`) and keep the old one working. Breaking includes
+renaming or removing a method, param or result field, changing a type or
+unit, making an optional param required, rejecting input accepted today
+(including recipient address types), and dropping the explicit-output,
+confidential-rejection or scanned-address guarantees. Adding optional
+params, adding result fields and accepting more recipient types are fine.
 
 ## 4. DEX (`elementsplus-dex`)
 

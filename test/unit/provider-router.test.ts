@@ -147,6 +147,30 @@ describe("dApp provider router", () => {
     assert.deepEqual(await pending, { result: { txid: txid(42) } });
   });
 
+  it("keeps the stable ep_sendTransfer contract (spec §3.4)", async () => {
+    const { router, permissions, controller, opened } = setup();
+    await permissions.grant(DEX, new Date());
+    const confidential =
+      "elementsl1pqwp9ze75659cn5ad0hw25nt2kv7j882gudn636hnh4qvjcmjh6jq5ca0d4cgl009m5rn5w0n3k2cqa3ths2qf7s8q6x2xplwgvlfhg0ag5kxszmzfcmc";
+    const bad = [
+      { assetId: ECX, amount: "5", recipient: confidential },
+      { assetId: ECX, amount: "5", recipient: ADDRESS_2, feeRate: 0 },
+      { assetId: ECX, amount: "5", recipient: ADDRESS_2, feeRate: 1_001 },
+      { assetId: ECX, amount: "5", recipient: ADDRESS_2, feeRate: 1.5 },
+    ];
+    for (const params of bad) {
+      assert.equal(errorCode(await router.request(DEX, { method: "ep_sendTransfer", params: [params] })), ProviderErrorCode.INVALID_PARAMS, JSON.stringify(params));
+    }
+    assert.equal(opened.length, 0);
+    // `[{…}]` is accepted like `{…}`; feeRate is optional and passed through.
+    const pending = router.request(DEX, { method: "ep_sendTransfer", params: [{ assetId: ECX, amount: "7", recipient: ADDRESS_2, feeRate: 1_000 }] });
+    await tick();
+    const described = await router.describe("request-1") as { approval: ApprovalView };
+    assert.deepEqual(controller.prepared[0]!.operation, { kind: "transfer", assetId: ECX, recipient: ADDRESS_2, amount: "7", feeRate: 1_000 });
+    await router.resolve({ requestId: "request-1", approved: true, approvalToken: described.approval.approvalToken, reviewHash: described.approval.reviewHash });
+    assert.deepEqual(await pending, { result: { txid: txid(42) } });
+  });
+
   it("rejects the prepared approval when the user declines a transaction", async () => {
     const { router, permissions, controller } = setup();
     await permissions.grant(DEX, new Date());
