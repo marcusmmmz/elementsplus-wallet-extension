@@ -79,8 +79,9 @@ export function atomicToDecimalInput(value: bigint, precision: number): string {
 
 /**
  * Conservative explicit-Elements size estimate for a transfer (P2WPKH inputs,
- * recipient + two change outputs + fee output). Used only for display and the
- * "Use max" suggestion; the core computes the real fee.
+ * recipient + two change outputs + fee output; 80 vB per output also covers a
+ * 34-byte Taproot recipient script). Used only for display and the "Use max"
+ * suggestion; the core computes the real fee.
  */
 export function estimateTransferVbytes(inputCount: number): number {
   const inputs = Math.max(1, inputCount);

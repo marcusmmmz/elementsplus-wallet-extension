@@ -8,8 +8,9 @@ use elements::confidential::{Asset, Nonce, Value};
 use elements::encode::{deserialize, serialize};
 use elements::hashes::Hash;
 use elements::pset::{PartiallySignedTransaction, PsbtSighashType};
+use elements::secp256k1_zkp::{PublicKey, Secp256k1, SecretKey};
 use elements::{
-    AssetId, EcdsaSighashType, OutPoint, Script, Sequence, Transaction, TxIn, TxOut, Txid,
+    Address, AssetId, EcdsaSighashType, OutPoint, Script, Sequence, Transaction, TxIn, TxOut, Txid,
 };
 use elementsplus_wallet_core::issuance::issuance_ids;
 use elementsplus_wallet_core::network::{self, ECX_ALPHA, ECX_BETA, ECX_MAINNET};
@@ -486,7 +487,7 @@ fn foreign_script_duplicates_and_overflow_are_rejected() {
 }
 
 #[test]
-fn recipient_must_be_unconfidential_p2wpkh() {
+fn recipient_must_be_lowercase_and_on_network() {
     let alice = core(ALICE);
     let mut request = TransferRequest {
         recipient: alice
@@ -509,6 +510,142 @@ fn recipient_must_be_unconfidential_p2wpkh() {
         alice.prepare_transfer(&request),
         Err(WalletError::InvalidRecipient(_))
     ));
+}
+
+/// `OP_1 <32-byte program>`, the script of a Taproot (e.g. Simplicity
+/// covenant) address.
+fn taproot_script() -> Script {
+    let mut bytes = vec![0x51, 32];
+    bytes.extend([0x5a; 32]);
+    Script::from(bytes)
+}
+
+fn segwit_address(hrp: &str, version: u8, program: &[u8]) -> String {
+    let hrp = bech32::Hrp::parse(hrp).unwrap();
+    let version = bech32::Fe32::try_from(version).unwrap();
+    bech32::segwit::encode(hrp, version, program).unwrap()
+}
+
+#[test]
+fn taproot_recipient_gets_an_explicit_output() {
+    let alice = core(ALICE);
+    let params = ECX_ALPHA.address.unwrap();
+    let script = taproot_script();
+    let native = Address::from_script(&script, None, params.native)
+        .unwrap()
+        .to_string();
+    let alias = Address::from_script(&script, None, params.alias)
+        .unwrap()
+        .to_string();
+    assert!(native.starts_with("elements1p"), "{native}");
+    assert!(alias.starts_with("ert1p"), "{alias}");
+    let token_utxo = fund(&alice, 0x71, token(), 900, Branch::External, 0).0;
+    let policy_utxo = fund(&alice, 0x72, policy(), 50_000, Branch::External, 1).0;
+
+    for recipient in [native.clone(), alias] {
+        let fee_rate = 25;
+        let prepared = alice
+            .prepare_transfer(&TransferRequest {
+                recipient,
+                asset_id: token().to_string(),
+                amount: 600,
+                fee_rate,
+                change_index: 0,
+                utxos: vec![token_utxo.clone(), policy_utxo.clone()],
+            })
+            .unwrap();
+        let review = &prepared.review;
+        assert_eq!(review.kind, TxKind::Transfer);
+        assert!(!review.confidential);
+        assert_eq!(review.external_outputs.len(), 1);
+        assert_eq!(review.external_outputs[0].address, native);
+        assert_eq!(review.external_outputs[0].asset_id, token().to_string());
+        assert_eq!(review.external_outputs[0].amount, 600);
+        assert!(!review.external_outputs[0].confidential);
+        assert_eq!(delta(&prepared, token()).as_deref(), Some("-600"));
+
+        let pset = pset_of(&prepared);
+        let output = &pset.outputs()[0];
+        assert_eq!(output.script_pubkey, script);
+        assert_eq!(output.asset, Some(token()));
+        assert_eq!(output.amount, Some(600));
+        assert!(output.asset_comm.is_none() && output.amount_comm.is_none());
+        assert!(output.blinding_key.is_none());
+
+        let signed = alice
+            .sign_prepared(&prepared, &prepared.review_hash)
+            .unwrap();
+        let tx = decode_tx(signed.raw_tx_hex.as_deref().unwrap());
+        assert_eq!(
+            tx.output[0],
+            txout(token(), 600, script.clone()),
+            "recipient output is explicit"
+        );
+        assert_eq!(tx.output[0].script_pubkey.len(), 34);
+        assert!(tx.output.last().unwrap().is_fee());
+        // The size model counts the 34-byte script: the fee covers the
+        // requested rate over the real transaction.
+        let vsize = tx.weight().div_ceil(4) as u64;
+        assert!(
+            review.fee >= vsize * fee_rate,
+            "fee {} below {fee_rate} sat/vB of {vsize} vB",
+            review.fee
+        );
+    }
+}
+
+#[test]
+fn unsupported_witness_recipients_are_rejected() {
+    let alice = core(ALICE);
+    let params = ECX_ALPHA.address.unwrap();
+    let blinder = PublicKey::from_secret_key(
+        &Secp256k1::new(),
+        &SecretKey::from_slice(&[0x01; 32]).unwrap(),
+    );
+    let base = TransferRequest {
+        recipient: String::new(),
+        asset_id: POLICY_ASSET.into(),
+        amount: 1_000,
+        fee_rate: 1,
+        change_index: 0,
+        utxos: vec![fund(&alice, 0x73, policy(), 100_000, Branch::External, 0).0],
+    };
+    let mut rejected = vec![
+        // Taproot recipients are explicit-only.
+        Address::from_script(&taproot_script(), Some(blinder), params.native)
+            .unwrap()
+            .to_string(),
+        Address::from_script(&taproot_script(), Some(blinder), params.alias)
+            .unwrap()
+            .to_string(),
+        // Witness v0 P2WSH.
+        segwit_address("elements", 0, &[0x5a; 32]),
+    ];
+    for hrp in ["elements", "ert"] {
+        // Witness v1 with a non-32-byte program.
+        for len in [20, 31, 33, 40] {
+            rejected.push(segwit_address(hrp, 1, &vec![0x5a; len]));
+        }
+        // Witness v2 and above.
+        for version in [2, 16] {
+            rejected.push(segwit_address(hrp, version, &[0x5a; 32]));
+        }
+    }
+    // Taproot on an unrelated network.
+    rejected.push(segwit_address("bc", 1, &[0x5a; 32]));
+    for recipient in rejected {
+        let request = TransferRequest {
+            recipient: recipient.clone(),
+            ..base.clone()
+        };
+        assert!(
+            matches!(
+                alice.prepare_transfer(&request),
+                Err(WalletError::InvalidRecipient(_))
+            ),
+            "{recipient}"
+        );
+    }
 }
 
 #[test]

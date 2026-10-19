@@ -428,6 +428,47 @@ fn spend_confidential_to_explicit_recipient() {
 }
 
 #[test]
+fn spend_confidential_to_explicit_taproot_recipient() {
+    let alice = new_core(ALICE).unwrap();
+    let (utxo, _) = ct_fund(&alice, 13, policy(), 200_000, Branch::External, 0);
+    let mut script = vec![0x51, 32];
+    script.extend([0x5a; 32]);
+    let script = Script::from(script);
+    let recipient = Address::from_script(&script, None, ECX_ALPHA.address.unwrap().native)
+        .unwrap()
+        .to_string();
+    let prepared = alice
+        .prepare_transfer(&TransferRequest {
+            recipient: recipient.clone(),
+            asset_id: POLICY_ASSET.into(),
+            amount: 50_000,
+            fee_rate: 3,
+            utxos: vec![utxo],
+            change_index: 4,
+        })
+        .unwrap();
+    let review = &prepared.review;
+    assert!(review.confidential);
+    assert_eq!(review.external_outputs[0].address, recipient);
+    assert!(!review.external_outputs[0].confidential);
+    let pset = pset_of(&prepared);
+    assert!(pset.outputs()[0].asset_comm.is_none(), "recipient explicit");
+    assert!(pset.outputs()[1].asset_comm.is_some(), "change blinded");
+
+    let signed = alice
+        .sign_prepared(&prepared, &prepared.review_hash)
+        .unwrap();
+    let raw = signed.raw_tx_hex.unwrap();
+    let tx = decode_tx(&raw);
+    assert!(!is_blinded(&tx.output[0]));
+    assert_eq!(tx.output[0].script_pubkey, script);
+    assert_eq!(tx.output[0].asset.explicit(), Some(policy()));
+    assert_eq!(tx.output[0].value.explicit(), Some(50_000));
+    assert!(is_blinded(&tx.output[1]));
+    assert_fee_covers(&prepared, &raw, 3);
+}
+
+#[test]
 fn spend_confidential_to_confidential_recipient() {
     let alice = new_core(ALICE).unwrap();
     let bob = new_core(BOB).unwrap();
