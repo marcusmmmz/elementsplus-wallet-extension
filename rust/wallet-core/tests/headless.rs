@@ -512,11 +512,19 @@ fn recipient_must_be_lowercase_and_on_network() {
     ));
 }
 
+/// A valid x-only public key (the secp256k1 generator's x coordinate).
+const TAPROOT_KEY: [u8; 32] = [
+    0x79, 0xbe, 0x66, 0x7e, 0xf9, 0xdc, 0xbb, 0xac, 0x55, 0xa0, 0x62, 0x95, 0xce, 0x87, 0x0b, 0x07,
+    0x02, 0x9b, 0xfc, 0xdb, 0x2d, 0xce, 0x28, 0xd9, 0x59, 0xf2, 0x81, 0x5b, 0x16, 0xf8, 0x17, 0x98,
+];
+/// 32 bytes that are not the x coordinate of any curve point.
+const OFF_CURVE_KEY: [u8; 32] = [0x5a; 32];
+
 /// `OP_1 <32-byte program>`, the script of a Taproot (e.g. Simplicity
 /// covenant) address.
 fn taproot_script() -> Script {
     let mut bytes = vec![0x51, 32];
-    bytes.extend([0x5a; 32]);
+    bytes.extend(TAPROOT_KEY);
     Script::from(bytes)
 }
 
@@ -619,7 +627,7 @@ fn unsupported_witness_recipients_are_rejected() {
             .unwrap()
             .to_string(),
         // Witness v0 P2WSH.
-        segwit_address("elements", 0, &[0x5a; 32]),
+        segwit_address("elements", 0, &TAPROOT_KEY),
     ];
     for hrp in ["elements", "ert"] {
         // Witness v1 with a non-32-byte program.
@@ -628,11 +636,13 @@ fn unsupported_witness_recipients_are_rejected() {
         }
         // Witness v2 and above.
         for version in [2, 16] {
-            rejected.push(segwit_address(hrp, version, &[0x5a; 32]));
+            rejected.push(segwit_address(hrp, version, &TAPROOT_KEY));
         }
+        // A 32-byte program that is not a valid x-only key is unspendable.
+        rejected.push(segwit_address(hrp, 1, &OFF_CURVE_KEY));
     }
     // Taproot on an unrelated network.
-    rejected.push(segwit_address("bc", 1, &[0x5a; 32]));
+    rejected.push(segwit_address("bc", 1, &TAPROOT_KEY));
     for recipient in rejected {
         let request = TransferRequest {
             recipient: recipient.clone(),
@@ -645,6 +655,60 @@ fn unsupported_witness_recipients_are_rejected() {
             ),
             "{recipient}"
         );
+    }
+}
+
+#[test]
+fn recipient_rejections_say_why() {
+    let alice = core(ALICE);
+    let params = ECX_ALPHA.address.unwrap();
+    let blinder = PublicKey::from_secret_key(
+        &Secp256k1::new(),
+        &SecretKey::from_slice(&[0x01; 32]).unwrap(),
+    );
+    let base = TransferRequest {
+        recipient: String::new(),
+        asset_id: POLICY_ASSET.into(),
+        amount: 1_000,
+        fee_rate: 1,
+        change_index: 0,
+        utxos: vec![fund(&alice, 0x74, policy(), 100_000, Branch::External, 0).0],
+    };
+    let cases = [
+        (
+            segwit_address("bc", 1, &TAPROOT_KEY),
+            "address is not on the configured network",
+        ),
+        (
+            segwit_address("bc", 2, &TAPROOT_KEY),
+            "address is not on the configured network",
+        ),
+        (
+            segwit_address("elements", 2, &TAPROOT_KEY),
+            "only unconfidential P2WPKH or Taproot addresses are supported",
+        ),
+        (
+            segwit_address("ert", 1, &OFF_CURVE_KEY),
+            "Taproot program is not a valid x-only public key",
+        ),
+        (
+            Address::from_script(&taproot_script(), Some(blinder), params.native)
+                .unwrap()
+                .to_string(),
+            "Taproot recipients must use the unconfidential address",
+        ),
+    ];
+    for (recipient, expected) in cases {
+        let request = TransferRequest {
+            recipient: recipient.clone(),
+            ..base.clone()
+        };
+        match alice.prepare_transfer(&request) {
+            Err(WalletError::InvalidRecipient(reason)) => {
+                assert_eq!(reason, expected, "{recipient}")
+            }
+            other => panic!("{recipient}: {other:?}"),
+        }
     }
 }
 

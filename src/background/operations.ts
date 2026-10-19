@@ -12,7 +12,7 @@ import {
   type SwapOffer,
   type TxReview,
 } from "../adapters/wallet-core.js";
-import { resolveEcxAddress } from "../network/esplora.js";
+import { isTransferRecipient, resolveEcxAddress } from "../network/esplora.js";
 import { FEE_PRESETS } from "../shared/amount.js";
 import { hasExactKeys, isPlainRecord, ValidationError } from "../shared/validation.js";
 
@@ -72,6 +72,7 @@ export function explicitAddress(value: unknown, field: string): string {
     throw new ValidationError(`${field} is not a valid address on this network`);
   }
   if (resolved.confidential) throw new ValidationError(`${field} must be an explicit (non-confidential) address`);
+  if (!isTransferRecipient(resolved)) throw new ValidationError(`${field} must be a P2WPKH or Taproot address`);
   return resolved.canonical;
 }
 

@@ -1,7 +1,7 @@
 import { NETWORK_IDENTITY } from "../../network/identity.js";
 /** Send → Confirm → Sent. */
 import type { ApprovalResult } from "../../background/controller.js";
-import { resolveEcxAddress } from "../../network/esplora.js";
+import { isTransferRecipient, resolveEcxAddress } from "../../network/esplora.js";
 import {
   AmountError,
   atomicToDecimalInput,
@@ -114,16 +114,21 @@ export function sendScreen(app: App, params: ScreenParams): HTMLElement {
 
   const next = button("Continue", () => void (async () => {
     showError(error, null);
-    let recipient: string;
+    let resolved;
     try {
-      const resolved = resolveEcxAddress(to.value.trim());
+      resolved = resolveEcxAddress(to.value.trim());
       if (resolved.confidential) throw new Error("confidential");
-      recipient = resolved.canonical;
     } catch {
       showError(error, `Enter a valid ${app.status?.network.name ?? NETWORK_IDENTITY.displayName} address`);
       to.focus();
       return;
     }
+    if (!isTransferRecipient(resolved)) {
+      showError(error, "Only P2WPKH and Taproot addresses are supported");
+      to.focus();
+      return;
+    }
+    const recipient = resolved.canonical;
     let atomic: bigint;
     try {
       atomic = parseDecimalAmount(amountInput.value, token.precision);

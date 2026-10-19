@@ -23,13 +23,14 @@
 use std::collections::BTreeSet;
 use std::str::FromStr;
 
-use bech32::segwit;
 use elements::bitcoin::bip32::{ChildNumber, DerivationPath};
 use elements::bitcoin::PublicKey;
 use elements::confidential::{Asset, Nonce, Value};
 use elements::encode::deserialize;
 use elements::hashes::Hash;
-use elements::secp256k1_zkp::{All, PublicKey as SecpPublicKey, Secp256k1, SecretKey};
+use elements::secp256k1_zkp::{
+    All, PublicKey as SecpPublicKey, Secp256k1, SecretKey, XOnlyPublicKey,
+};
 use elements::{
     Address, AddressParams, AssetId, BlockHash, OutPoint, Script, Transaction, TxOut, TxOutWitness,
     Txid, WPubkeyHash,
@@ -749,7 +750,7 @@ impl WalletCore {
     }
 
     /// Parse an unconfidential P2WPKH or Taproot (witness v1, 32-byte
-    /// program) address or, for the configured networks, a confidential
+    /// x-only key) address or, for the configured networks, a confidential
     /// (blech32) P2WPKH address. Taproot recipients are explicit-only: a
     /// covenant output that arrives blinded may never be spendable.
     pub(crate) fn parse_recipient(&self, recipient: &str) -> Result<Recipient, WalletError> {
@@ -758,19 +759,38 @@ impl WalletCore {
                 "address must use canonical lowercase encoding",
             ));
         }
-        for params in [self.native_address_params, self.alias_address_params] {
-            let prefix = format!("{}1", params.blech_hrp);
-            if !recipient.starts_with(&prefix) {
-                continue;
-            }
-            let address = Address::parse_with_params(recipient, params)
-                .map_err(|_| WalletError::InvalidRecipient("invalid confidential address"))?;
-            let script = address.script_pubkey();
-            let Some(blinding_key) = address.blinding_pubkey else {
+        // The bech32 charset has no '1', so the last one ends the HRP.
+        let hrp = recipient.rsplit_once('1').map_or("", |(hrp, _)| hrp);
+        let network = [self.native_address_params, self.alias_address_params]
+            .into_iter()
+            .find_map(|params| {
+                if hrp == params.bech_hrp.as_str() {
+                    Some((params, false))
+                } else if hrp == params.blech_hrp.as_str() {
+                    Some((params, true))
+                } else {
+                    None
+                }
+            });
+        let Some((params, confidential)) = network else {
+            return Err(WalletError::InvalidRecipient(
+                "address is not on the configured network",
+            ));
+        };
+        let address = Address::parse_with_params(recipient, params).map_err(|_| {
+            WalletError::InvalidRecipient(if confidential {
+                "invalid confidential address"
+            } else {
+                "invalid bech32 address"
+            })
+        })?;
+        let script = address.script_pubkey();
+        if let Some(blinding_key) = address.blinding_pubkey {
+            if script.is_v1_p2tr() {
                 return Err(WalletError::InvalidRecipient(
-                    "invalid confidential address",
+                    "Taproot recipients must use the unconfidential address",
                 ));
-            };
+            }
             if !script.is_v0_p2wpkh() {
                 return Err(WalletError::InvalidRecipient(
                     "only confidential P2WPKH addresses are supported",
@@ -781,26 +801,18 @@ impl WalletCore {
                 blinding_key: Some(blinding_key),
             });
         }
-        let (hrp, version, program) = segwit::decode(recipient)
-            .map_err(|_| WalletError::InvalidRecipient("invalid bech32 address"))?;
-        let opcode = match (version, program.len()) {
-            (segwit::VERSION_0, 20) => Some(0x00),
-            (segwit::VERSION_1, 32) => Some(0x51), // OP_1
-            _ => None,
-        };
-        let Some(opcode) = opcode.filter(|_| {
-            hrp == self.native_address_params.bech_hrp || hrp == self.alias_address_params.bech_hrp
-        }) else {
+        if script.is_v1_p2tr() {
+            // An off-curve program can never be spent: refuse to burn funds.
+            XOnlyPublicKey::from_slice(&script.as_bytes()[2..]).map_err(|_| {
+                WalletError::InvalidRecipient("Taproot program is not a valid x-only public key")
+            })?;
+        } else if !script.is_v0_p2wpkh() {
             return Err(WalletError::InvalidRecipient(
-                "only configured unconfidential P2WPKH or Taproot addresses are supported",
+                "only unconfidential P2WPKH or Taproot addresses are supported",
             ));
-        };
-        let mut bytes = Vec::with_capacity(2 + program.len());
-        bytes.push(opcode);
-        bytes.push(program.len() as u8);
-        bytes.extend(program);
+        }
         Ok(Recipient {
-            script: Script::from(bytes),
+            script,
             blinding_key: None,
         })
     }

@@ -17,8 +17,8 @@ describe("operation validation", () => {
   });
 
   it("accepts unconfidential Taproot recipients and rejects confidential ones", () => {
-    const taproot = "elements1ptfd95kj6tfd95kj6tfd95kj6tfd95kj6tfd95kj6tfd95kj6tfdqfzvevn";
-    const taprootAlias = "ert1ptfd95kj6tfd95kj6tfd95kj6tfd95kj6tfd95kj6tfd95kj6tfdq08u6qv";
+    const taproot = "elements1p0xlxvlhemja6c4dqv22uapctqupfhlxm9h8z3k2e72q4k9hcz7vq03sxcp";
+    const taprootAlias = "ert1p0xlxvlhemja6c4dqv22uapctqupfhlxm9h8z3k2e72q4k9hcz7vqf5q957";
     for (const recipient of [taproot, taprootAlias]) {
       const op = validateOperation({ kind: "transfer", assetId: ECX, recipient, amount: "5" });
       assert.deepEqual(op, { kind: "transfer", assetId: ECX, recipient: taproot, amount: "5", feeRate: 2 });
@@ -31,6 +31,26 @@ describe("operation validation", () => {
       assert.throws(
         () => validateOperation({ kind: "transfer", assetId: ECX, recipient, amount: "5" }),
         /must be an explicit \(non-confidential\) address/,
+        recipient,
+      );
+    }
+  });
+
+  it("accepts only P2WPKH and Taproot recipient scripts", () => {
+    const op = validateOperation({ kind: "transfer", assetId: ECX, recipient: ADDRESS_2, amount: "5" });
+    assert.equal(op.kind === "transfer" && op.recipient, ADDRESS_2);
+    const unsupported = [
+      // Witness v0 P2WSH (32-byte program).
+      "elements1q0xlxvlhemja6c4dqv22uapctqupfhlxm9h8z3k2e72q4k9hcz7vq9xs0qa",
+      // Witness v2.
+      "elements1z0xlxvlhemja6c4dqv22uapctqupfhlxm9h8z3k2e72q4k9hcz7vq8vffk2",
+      // Witness v1 with a 33-byte program.
+      "elements1p0xlxvlhemja6c4dqv22uapctqupfhlxm9h8z3k2e72q4k9hcz7vqznfk9vd",
+    ];
+    for (const recipient of unsupported) {
+      assert.throws(
+        () => validateOperation({ kind: "transfer", assetId: ECX, recipient, amount: "5" }),
+        /recipient must be a P2WPKH or Taproot address/,
         recipient,
       );
     }

@@ -431,8 +431,11 @@ fn spend_confidential_to_explicit_recipient() {
 fn spend_confidential_to_explicit_taproot_recipient() {
     let alice = new_core(ALICE).unwrap();
     let (utxo, _) = ct_fund(&alice, 13, policy(), 200_000, Branch::External, 0);
+    // `OP_1 <x-only key>`; the key is the secp256k1 generator's x coordinate.
     let mut script = vec![0x51, 32];
-    script.extend([0x5a; 32]);
+    script.extend(
+        hex::decode("79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798").unwrap(),
+    );
     let script = Script::from(script);
     let recipient = Address::from_script(&script, None, ECX_ALPHA.address.unwrap().native)
         .unwrap()

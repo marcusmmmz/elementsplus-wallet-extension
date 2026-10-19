@@ -363,6 +363,15 @@ export function resolveEcxAddress(address: string): EcxAddress {
   });
 }
 
+/**
+ * Whether the wallet core can send to this address: P2WPKH (witness v0, 20 bytes) or Taproot
+ * (witness v1, 32 bytes). The core also checks the Taproot program is a valid x-only key.
+ */
+export function isTransferRecipient(address: EcxAddress): boolean {
+  return (address.witnessVersion === 0 && address.witnessProgramLength === 20)
+    || (address.witnessVersion === 1 && address.witnessProgramLength === 32);
+}
+
 function explorerApiUrl(explorerUrl: string): string {
   const parsed = new URL(explorerUrl);
   if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
